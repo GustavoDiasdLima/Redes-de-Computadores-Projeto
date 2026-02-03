@@ -27,9 +27,9 @@ class Client:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
         while self.running:
-            msg = f"DISCOVER_REQUEST;PORT={self.tcp_port}"
+            msg = f"[Broadcast enviado] Bom_dia;sua_bolsa={self.tcp_port}"
             sock.sendto(msg.encode(), (BROADCAST_ADDR, BROADCAST_PORT))
-            print(f"[Broadcast enviado] {msg}")
+            print(msg)
             time.sleep(BROADCAST_DELAY)
 
     # -----------------------------------------------------------
