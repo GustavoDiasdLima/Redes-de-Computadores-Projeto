@@ -1,5 +1,6 @@
+# de ninho
 import socket
-import threading
+import threading #nao copiei kk
 import random
 import time
 import uuid
@@ -27,9 +28,9 @@ class Client:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
         while self.running:
-            msg = f"[Broadcast enviado] Bom_dia;sua_bolsa={self.tcp_port}"
+            msg = f"DISCOVER_REQUEST;PORT={self.tcp_port}"
             sock.sendto(msg.encode(), (BROADCAST_ADDR, BROADCAST_PORT))
-            print(msg)
+            print(f"[Broadcast enviado] {msg}")
             time.sleep(BROADCAST_DELAY)
 
     # -----------------------------------------------------------

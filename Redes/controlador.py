@@ -1,5 +1,5 @@
 import socket
-import threading
+import threading #esse? ninho
 import time
 
 BROADCAST_PORT = 50000
@@ -87,15 +87,6 @@ class DiscoveryServer:
         except Exception as e:
             print(f"Erro ao conectar via TCP: {e}")
 
-    #def get_controle(self):
-        #cria uma lista que guarda todas as portas "listadeportas"
-        #if porta in listadeportas:
-            #inicia a conexão com o cliente
-            #menu de opções de mouse ou teclado:
-                #controle do dispositivo
-                #opção de desconectar
-        #senão
-            #coloca a mensagem de erro e volta para o menu do server
     # ----------------------------------------------------------------
     # MENU COM match-case
     # ----------------------------------------------------------------
@@ -136,3 +127,5 @@ class DiscoveryServer:
 
 if __name__ == "__main__":
     DiscoveryServer().start()
+
+#================= help
