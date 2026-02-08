@@ -1,6 +1,7 @@
 import socket
 import threading #esse? ninho
 import time
+from dadosCliente import dadosCliente
 
 BROADCAST_PORT = 50000
 
