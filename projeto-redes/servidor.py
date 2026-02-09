@@ -3,6 +3,7 @@ import threading
 import time
 import json
 import csv
+from pynput import keyboard, mouse
 
 BROADCAST_PORT = 50000
 
@@ -199,6 +200,108 @@ class DiscoveryServer:
                 case "0":
                     exit()
 
+    # ----------------------------------------------------------------
+    # CONTROLE REMOTO DE TECLADO!!!!!!!!!!!
+    # ----------------------------------------------------------------
+    def control_keyboard(self, key):
+        if key not in self.clients:
+            print("Cliente não encontrado!")
+            return
+
+        ip, port = key
+        print(f"[Servidor] Conectando ao cliente {ip}:{port} para controle de teclado")
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((ip, port))
+            sock.send(b"KEYBOARD_START\n")
+
+            def on_press(k):
+                try:
+                    msg = f"KEY;DOWN;{k.char}\n"
+                except AttributeError:
+                    msg = f"KEY;DOWN;{k}\n"
+                sock.send(msg.encode())
+
+            def on_release(k):
+                try:
+                    msg = f"KEY;UP;{k.char}\n"
+                except AttributeError:
+                    msg = f"KEY;UP;{k}\n"
+                sock.send(msg.encode())
+
+                if k == keyboard.Key.esc:
+                    sock.send(b"KEYBOARD_STOP\n")
+                    sock.send(b"SESSION_END\n")
+                    return False
+
+            print(">>> Controle de teclado ativo (ESC para sair)")
+            listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+            listener.start()
+            listener.join()
+
+            sock.close()
+            print("[Servidor] Sessão de teclado encerrada")
+
+        except Exception as e:
+            print(f"Erro no controle de teclado: {e}")
+
+    # ----------------------------------------------------------
+    # Mouse
+    # ----------------------------------------------------------
+
+    def control_mousepad(self, key):
+        if key not in self.clients:
+            print("Cliente não encontrado!")
+            return
+
+        ip, port = key
+        print(f"[Servidor] Conectando ao cliente {ip}:{port} para controle de mouse")
+
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((ip, port))
+            sock.send(b"MOUSE_START\n")
+
+            last_pos = None
+
+            def on_move(x, y):
+                nonlocal last_pos
+                if last_pos is None:
+                    last_pos = (x, y)
+                    return
+                dx = x - last_pos[0]
+                dy = y - last_pos[1]
+                last_pos = (x, y)
+                sock.send(f"MOUSE;MOVE;{dx};{dy}\n".encode())
+
+            def on_click(x, y, button, pressed):
+                # botão do meio encerra sessão
+                if button == mouse.Button.middle and pressed:
+                    sock.send(b"MOUSE_STOP\n")
+                    sock.send(b"SESSION_END\n")
+                    return False  # encerra o mouse.Listener
+
+                action = "DOWN" if pressed else "UP"
+                sock.send(f"MOUSE;CLICK;{button.name};{action}\n".encode())
+
+            def on_scroll(x, y, dx, dy):
+                sock.send(f"MOUSE;SCROLL;{dx};{dy}\n".encode())
+
+            print(">>> Controle de mouse ativo (BOTÃO DO MEIO para sair)")
+            with mouse.Listener(
+                on_move=on_move,
+                on_click=on_click,
+                on_scroll=on_scroll
+            ) as listener:
+                listener.join()
+
+            sock.close()
+            print("[Servidor] Sessão de mouse encerrada")
+
+        except Exception as e:
+            print(f"Erro no controle de mouse: {e}")
+
+#==============================
     def start(self):
         threading.Thread(target=self.listen_broadcasts, daemon=True).start()
         self.menu()
