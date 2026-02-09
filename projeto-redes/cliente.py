@@ -1,137 +1,58 @@
 import socket
 import threading
+import random
 import time
-import json
-import psutil
-import platform
 import uuid
+import psutil
+import json
 from pynput.keyboard import Controller, Key
 from pynput.mouse import Controller as MouseController, Button
-
+import platform
 
 BROADCAST_PORT = 50000
-TCP_PORT = 50010   # Porta TCP do cliente
-BROADCAST_ADDR = "255.255.255.255"
-HELLO_INTERVAL = 5   # segundos
+BROADCAST_ADDR = "<broadcast>"
+BROADCAST_DELAY = 5
 
 
-#NO CLIENTE.py
-# ==========================================================
-# COLETA DE INVENTÁRIO
-# ==========================================================
-def coletar_dados():
+class Client:
+    def __init__(self):
+        self.tcp_port = random.randint(20000, 40000)
+        self.running = True
+        self.mac = self.get_local_mac()
 
-    cpu_cores = psutil.cpu_count(logical=True)
+    def get_local_mac(self):
+        mac_int = uuid.getnode()
+        return ":".join(f"{(mac_int >> 8*i) & 0xff:02x}" for i in reversed(range(6)))
 
-    ram_livre = psutil.virtual_memory().available / (1024**3)
+    # -----------------------------------------------------------
+    # UDP: broadcast de descoberta
+    # -----------------------------------------------------------
+    def send_broadcast(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        while self.running:
+            msg = f"DISCOVER_REQUEST;PORT={self.tcp_port}"
+            sock.sendto(msg.encode(), (BROADCAST_ADDR, BROADCAST_PORT))
+            time.sleep(BROADCAST_DELAY)
 
-    disco_livre = psutil.disk_usage('/').free / (1024**3)
+    # -----------------------------------------------------------
+    # TCP: servidor interno para responder comandos
+    # -----------------------------------------------------------
+    def tcp_server(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("", self.tcp_port))
+        sock.listen(5)
+        print(f"[Querido e gentil cliente] Servidor TCP escutando na portinha {self.tcp_port}...")
 
-    interfaces_info = []
+        while self.running:
+            conn, addr = sock.accept()
+            threading.Thread(
+                target=self.handle_tcp_connection,
+                args=(conn, addr),
+                daemon=True
+            ).start()
 
-    addrs = psutil.net_if_addrs()
-    stats = psutil.net_if_stats()
-
-    for nome, enderecos in addrs.items():
-        for addr in enderecos:
-            if addr.family == socket.AF_INET:
-                interfaces_info.append({
-                    "interface": nome,
-                    "ip": addr.address,
-                    "status": "UP" if stats[nome].isup else "DOWN",
-                    "tipo": identificar_tipo(nome)
-                })
-
-    so = platform.system() + " " + platform.release()
-
-    return {
-        "cpu_cores": cpu_cores,
-        "ram_livre_gb": round(ram_livre, 2),
-        "disco_livre_gb": round(disco_livre, 2),
-        "interfaces": interfaces_info,
-        "sistema_operacional": so
-    }
-
-
-def identificar_tipo(nome):
-    nome = nome.lower()
-
-    if "loopback" in nome or nome == "lo":
-        return "loopback"
-    if "wi" in nome or "wlan" in nome:
-        return "wifi"
-    return "ethernet"
-
-
-# ==========================================================
-# MAC ADDRESS
-# ==========================================================
-def get_mac():
-    mac = uuid.getnode()
-    mac = ':'.join(f"{(mac >> ele) & 0xff:02x}" for ele in range(40, -1, -8))
-    return mac
-
-
-# ==========================================================
-# SERVIDOR TCP DO CLIENTE
-# ==========================================================
-def tcp_server():
-
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(("", TCP_PORT))
-    s.listen()
-
-    print(f"[Cliente] Servidor TCP ouvindo na porta {TCP_PORT}")
-
-    while True:
-        conn, addr = s.accept()
-        cmd = conn.recv(1024).decode()
-
-        if cmd == "GET_MAC":
-            mac = get_mac()
-            conn.send(f"MAC_ADDRESS;{mac}".encode())
-
-        elif cmd == "GET_INVENTORY":
-            inventario = coletar_dados()
-            conn.send(json.dumps(inventario).encode())
-
-        conn.close()
-
-
-# ==========================================================
-# BROADCAST DISCOVERY
-# ==========================================================
-def broadcast_loop():
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-
-    while True:
-        msg = f"DISCOVER_REQUEST;TCP_PORT={TCP_PORT}"
-        sock.sendto(msg.encode(), ("255.255.255.255", BROADCAST_PORT))
-
-        time.sleep(10)
-
-
-#===============
-def enviar_hello():
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-
-    while True:
-
-        msg = f"HELLO;PORT={TCP_PORT}"
-
-        sock.sendto(msg.encode(), (BROADCAST_ADDR, BROADCAST_PORT))
-
-        print("[HELLO ( from the other side) enviado ao servidor]")
-
-        time.sleep(HELLO_INTERVAL)
-
-#===========================
-
-# --------------------------------------------------------
+    # --------------------------------------------------------
     # Handle do TCP
     # --------------------------------------------------------
     def handle_tcp_connection(self, conn, addr):
@@ -183,6 +104,13 @@ def enviar_hello():
                         conn.close()
                         return
 
+                    # ---------- INVENTÁRIO ----------
+                    if line == "GET_INVENTORY":
+                        inventario = self.coletar_dados()
+                        payload = json.dumps(inventario)
+                        conn.send(f"INVENTORY;{payload}\n".encode())
+                        continue
+
                     if keyboard_active and line.startswith("KEY;"):
                         try:
                             _, action, key = line.split(";", 2)
@@ -199,7 +127,7 @@ def enviar_hello():
                             elif action == "UP":
                                 keyboard_ctl.release(k)
                         except Exception as e:
-                            print("Erro ao processar tecla:", e)
+                            print("ERROOOO ao processar tecla:", e)
 
                     if mouse_active and line.startswith("MOUSE;"):
                         try:
@@ -223,26 +151,70 @@ def enviar_hello():
                                 mouse_ctl.scroll(dx, dy)
 
                         except Exception as e:
-                            print("Erro mouse:", e)
+                            print("ERRO mouse:", e)
 
             except Exception as k:
-                print(f"[TCP] Erro na conexão {addr}: {k}")
+                print(f"[TCP] ERRO na conexão :( ) {addr}: {k}")
                 break
 
         conn.close()
-        print(f"[TCP] Conexão encerrada {addr}")
+        print(f"[TCP] Conexão encerrada!! {addr}")
+
+    #NO CLIENTE.py
+    # ==========================================================
+    # COLETA DE INVENTÁRIO
+    # ==========================================================
+    
+
+    def coletar_dados(self):
+        cpu_cores = psutil.cpu_count(logical=True)
+        ram_livre = psutil.virtual_memory().available / (1024**3)
+        disco_livre = psutil.disk_usage('/').free / (1024**3)
+
+        interfaces_info = []
+
+        addrs = psutil.net_if_addrs()
+        stats = psutil.net_if_stats()
+
+        for nome, enderecos in addrs.items():
+            for addr in enderecos:
+                if addr.family == socket.AF_INET:
+                    interfaces_info.append({
+                        "interface": nome,
+                        "ip": addr.address,
+                        "status": "UP" if stats[nome].isup else "DOWN",
+                        "tipo": self.identificar_tipo(nome)
+                    })
+
+        so = platform.system() + " " + platform.release()
+
+        return {
+            "cpu_cores": cpu_cores,
+            "ram_livre_gb": round(ram_livre, 2),
+            "disco_livre_gb": round(disco_livre, 2),
+            "interfaces": interfaces_info,
+            "sistema_operacional": so
+        }
 
 
-# ==========================================================
-# MAIN
-# ==========================================================
+    def identificar_tipo(self, nome):
+        nome = nome.lower()
+        if "loopback" in nome or nome == "lo":
+            return "loopback"
+        if "wi" in nome or "wlan" in nome:
+            return "wifi"
+        return "ethernet"
+
+    # --------------------------------------------------------
+    # Main
+    # --------------------------------------------------------
+    def start(self):
+        threading.Thread(target=self.send_broadcast, daemon=True).start()
+        threading.Thread(target=self.tcp_server, daemon=True).start()
+        print(f"[Cliente] TCP_PORT={self.tcp_port} | MAC={self.mac}")
+        while self.running:
+            time.sleep(5)
+
+
 if __name__ == "__main__":
-
-    threading.Thread(target=tcp_server, daemon=True).start()
-
-    threading.Thread(target=broadcast_loop, daemon=True).start()
-
-    threading.Thread(target=enviar_hello, daemon=True).start()
-
-    while True:
-        time.sleep(1)
+    Client().start()

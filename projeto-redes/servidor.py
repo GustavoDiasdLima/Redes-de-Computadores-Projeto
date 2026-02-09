@@ -15,36 +15,34 @@ class ClientInfo:
         self.last_seen = time.time()
         self.last_msg = ""
         self.mac = None
-        self.inventory = {}
+        self.inventory = None
 
     def update(self, msg):
         self.last_msg = msg
         self.last_seen = time.time()
 
-    def status(self):
-        return "ONLINE" if time.time() - self.last_seen <= 30 else "OFFLINE"
-
     def __repr__(self):
-        return f"{self.ip}:{self.tcp_port} | {self.status()}"
+        age = round(time.time() - self.last_seen, 1)
+        return f"{self.ip}:{self.tcp_port} | MAC={self.mac} | UltimaMsg='{self.last_msg}' | {age}s atrás"
 
 
 class DiscoveryServer:
     def __init__(self):
-        self.clients = {}
+        self.clients = {}  # chave: (ip, tcp_port)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("", BROADCAST_PORT))
 
-    # ======================================================
-    # DISCOVERY
-    # ======================================================
+    # ----------------------------------------------------------------
+    # ESCUTA BROADCASTS
+    # ----------------------------------------------------------------
     def listen_broadcasts(self):
-
-        print(f"[Servidor] Ouvindo broadcasts {BROADCAST_PORT}")
-
+        print(f"[Magnífico e inderrubável Servidor] Ouvindo broadcasts na portinha {BROADCAST_PORT}...")
         while True:
             data, addr = self.sock.recvfrom(1024)
             msg = data.decode()
             ip = addr[0]
+
+            print(f"[Broadcast de {ip}] {msg}")
 
             if msg.startswith("DISCOVER_REQUEST"):
                 tcp_port = int(msg.split("=")[1])
@@ -55,161 +53,43 @@ class DiscoveryServer:
                     print(f"[Novo cliente] {ip}:{tcp_port}")
 
                 self.clients[key].update(msg)
+                self.sock.sendto("DISCOVER_RESPONSE".encode(), addr)
 
-    # ======================================================
-    # TCP REQUESTS
-    # ======================================================
-    def tcp_request(self, key, command):
+    # ----------------------------------------------------------------
+    # SOLICITA MAC via TCP
+    # ----------------------------------------------------------------
+    def ask_mac_tcp(self, key):
+        if key not in self.clients:
+            print("Infelizmente cliente não encontrado :/ !")
+            return
 
         ip, port = key
-
+        print(f"[Servidor] Conectando via TCP em {ip}:{port} ...")
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((ip, port))
-
-            sock.send(command.encode())
-            response = sock.recv(4096).decode()
+            sock.send(b"GET_MAC\n")
+            response = sock.recv(1024).decode().strip()
             sock.close()
 
-            return response
+            if response.startswith("MAC_ADDRESS;"):
+                mac = response.split(";")[1]
+                self.clients[key].mac = mac
+                print(f"[MAC recebido via TCP] {ip}:{port} => {mac}")
 
         except Exception as e:
-            print(f"Erro TCP {ip}: {e}")
-            return None
-
-    def ask_mac(self, key):
-
-        resp = self.tcp_request(key, "GET_MAC")
-
-        if resp and resp.startswith("MAC_ADDRESS"):
-            mac = resp.split(";")[1]
-            self.clients[key].mac = mac
-
-    def ask_inventory(self, key):
-
-        resp = self.tcp_request(key, "GET_INVENTORY")
-
-        if resp:
-            self.clients[key].inventory = json.loads(resp)
-
-    # ======================================================
-    # DASHBOARD
-    # ======================================================
-    def dashboard(self):
-
-        print("\n=== DASHBOARD ===")
-
-        online = 0
-        offline = 0
-
-        for key, c in self.clients.items():
-
-            status = c.status()
-
-            if status == "ONLINE":
-                online += 1
-            else:
-                offline += 1
-
-            so = c.inventory.get("sistema_operacional", "N/A")
-
-            print(f"{c.ip}:{c.tcp_port} | {status} | {so}")
-
-        print(f"\nOnline: {online} | Offline: {offline}")
-
-    # ======================================================
-    # CONSOLIDADO
-    # ======================================================
-    def consolidado(self):
-
-        total_cpu = total_ram = total_disco = count = 0
-
-        for c in self.clients.values():
-            inv = c.inventory
-            if inv:
-                total_cpu += inv["cpu_cores"]
-                total_ram += inv["ram_livre_gb"]
-                total_disco += inv["disco_livre_gb"]
-                count += 1
-
-        if count == 0:
-            print("Sem dados")
-            return
-
-        print("\n=== MÉDIAS ===")
-        print("CPU:", total_cpu / count)
-        print("RAM:", total_ram / count)
-        print("Disco:", total_disco / count)
-
-    # ======================================================
-    # EXPORTAÇÃO
-    # ======================================================
-    def export_csv(self):
-
-        with open("relatorio.csv", "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["IP", "CPU", "RAM", "Disco", "SO"])
-
-            for c in self.clients.values():
-                inv = c.inventory
-                if inv:
-                    writer.writerow([
-                        c.ip,
-                        inv["cpu_cores"],
-                        inv["ram_livre_gb"],
-                        inv["disco_livre_gb"],
-                        inv["sistema_operacional"]
-                    ])
-
-        print("CSV exportado")
-
-    # ======================================================
-    # MENU
-    # ======================================================
-    def menu(self):
-
-        while True:
-            print("\n1- Clientes")
-            print("2- Dashboard")
-            print("3- Coletar inventário")
-            print("4- Consolidado")
-            print("5- Exportar CSV")
-            print("0- Sair")
-
-            op = input("> ")
-
-            match op:
-
-                case "1":
-                    for k in self.clients:
-                        print(k)
-
-                case "2":
-                    self.dashboard()
-
-                case "3":
-                    for k in self.clients:
-                        self.ask_inventory(k)
-
-                case "4":
-                    self.consolidado()
-
-                case "5":
-                    self.export_csv()
-
-                case "0":
-                    exit()
+            print(f"ERRO ao conectar via TCP: {e}")
 
     # ----------------------------------------------------------------
-    # CONTROLE REMOTO DE TECLADO!!!!!!!!!!!
+    # CONTROLE REMOTO DE TECLADO
     # ----------------------------------------------------------------
     def control_keyboard(self, key):
         if key not in self.clients:
-            print("Cliente não encontrado!")
+            print("Infelizmente cliente não encontrado :/ !")
             return
 
         ip, port = key
-        print(f"[Servidor] Conectando ao cliente {ip}:{port} para controle de teclado")
+        print(f"[Servidor] Conectando ao cliente {ip}:{port} para controle de teclado gamer")
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((ip, port))
@@ -234,7 +114,7 @@ class DiscoveryServer:
                     sock.send(b"SESSION_END\n")
                     return False
 
-            print(">>> Controle de teclado ativo (ESC para sair)")
+            print(">>> Controle de teclado ativo EBAA xD (ESC para sair)")
             listener = keyboard.Listener(on_press=on_press, on_release=on_release)
             listener.start()
             listener.join()
@@ -243,7 +123,7 @@ class DiscoveryServer:
             print("[Servidor] Sessão de teclado encerrada")
 
         except Exception as e:
-            print(f"Erro no controle de teclado: {e}")
+            print(f"ERRO no controle de teclado '0' : {e}")
 
     # ----------------------------------------------------------
     # Mouse
@@ -251,7 +131,7 @@ class DiscoveryServer:
 
     def control_mousepad(self, key):
         if key not in self.clients:
-            print("Cliente não encontrado!")
+            print("Infelizmente cliente não encontrado :/ !")
             return
 
         ip, port = key
@@ -296,12 +176,144 @@ class DiscoveryServer:
                 listener.join()
 
             sock.close()
-            print("[Servidor] Sessão de mouse encerrada")
+            print("[Servidor] Sessão de mouse encerrada :/ ")
 
         except Exception as e:
-            print(f"Erro no controle de mouse: {e}")
+            print(f"ERRO no controle de mouse ;-; : {e}")
+    
+    # ======================================================
+    # CONSOLIDADO
+    # ======================================================
+    def consolidado(self):
 
-#==============================
+        total_cpu = total_ram = total_disco = count = 0
+
+        for c in self.clients.values():
+            inv = c.inventory
+            if inv:
+                total_cpu += inv["cpu_cores"]
+                total_ram += inv["ram_livre_gb"]
+                total_disco += inv["disco_livre_gb"]
+                count += 1
+
+        if count == 0:
+            print("Sem dados")
+            return
+
+        print("\n=== MÉDIAS ===")
+        print("CPU:", total_cpu / count)
+        print("RAM:", total_ram / count)
+        print("Disco:", total_disco / count)
+
+    # ======================================================
+    # EXPORTAÇÃO
+    # ======================================================
+    def export_csv(self):
+
+        with open("relatorio.csv", "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["IP", "CPU", "RAM", "Disco", "SO"])
+
+            for c in self.clients.values():
+                inv = c.inventory
+                if inv:
+                    writer.writerow([
+                        c.ip,
+                        inv["cpu_cores"],
+                        inv["ram_livre_gb"],
+                        inv["disco_livre_gb"],
+                        inv["sistema_operacional"]
+                    ])
+
+        print("CSV exportado! Confira as informações!")
+
+    def ask_inventory_tcp(self, key):
+        if key not in self.clients:
+            return
+
+        ip, port = key
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((ip, port))
+            sock.send(b"GET_INVENTORY\n")
+
+            data = sock.recv(4096).decode().strip()
+            sock.close()
+
+            if data.startswith("INVENTORY;"):
+                json_data = data.split(";", 1)[1]
+                inventory = json.loads(json_data)
+                self.clients[key].inventory = inventory
+                print(f"[Inventário recebido] {ip}:{port}")
+
+        except Exception as e:
+            print("ERRO inventário:", e)
+
+
+
+    # ----------------------------------------------------------------
+    # MENU INTERATIVO
+    # ----------------------------------------------------------------
+    def menu(self):
+        while True:
+            print("\n=== Seja bem-vindo(a) ao MENU do  SERVIDOR ===")
+            print("1 - Listar clientes")
+            print("2 - Solicitar MAC de um cliente")
+            print("3 - Solicitar MAC de todos os clientes")
+            print("4 - Controlar teclado de um cliente")
+            print("5 - Controlar mouse de um cliente")
+            print("6 - Coletar inventário de todos")
+            print("7 - Consolidado")
+            print("8 - Exportar CSV")
+            print("0 - Sair")
+            op = input("> ")
+
+            match op:
+                case "1":
+                    print("\n--- CLIENTES ---")
+                    for key, info in self.clients.items():
+                        print(f"{key} -> {info}")
+
+                case "2":
+                    ip = input("Digite o IP: ")
+                    port = int(input("Digite a porta TCP do cliente: "))
+                    self.ask_mac_tcp((ip, port))
+
+                case "3":
+                    for key in self.clients:
+                        self.ask_mac_tcp(key)
+
+                case "4":
+                    ip = input("Digite o IP do cliente: ")
+                    port = int(input("Digite a porta TCP do cliente: "))
+                    self.control_keyboard((ip, port))
+
+                case "5":
+                    ip = input("Digite o IP do cliente: ")
+                    port = int(input("Digite a porta TCP do cliente: "))
+                    self.control_mousepad((ip, port))
+
+                case "6":
+                    for key in self.clients:
+                        self.ask_inventory_tcp(key)
+
+                case "7":
+                    self.consolidado()
+
+                case "8":
+                    self.export_csv()
+
+
+                case "0":
+                    print("Saindo...")
+                    exit()
+
+                case _:
+                    print("Opção inválida!")
+
+    # ----------------------------------------------------------------
+    # START
+    # ----------------------------------------------------------------
     def start(self):
         threading.Thread(target=self.listen_broadcasts, daemon=True).start()
         self.menu()
