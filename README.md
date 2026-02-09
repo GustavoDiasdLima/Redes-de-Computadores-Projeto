@@ -5,14 +5,14 @@ Construir um sistema cliente/servidor para inventário e monitoramento de comput
 descoberta automática, coleta de métricas, consolidação de dados e ação remota segura, por meio de
 comandos administrativos ou integração com ferramenta padrão de controle remoto.
 
-## 2. FUNCIONALIDADES (4,0 PONTOS)
-### 2.1 Coleta por Cliente (2,0 pontos)
+## 2. FUNCIONALIDADES (4,0 PONTOS) :white_check_mark: 
+### 2.1 Coleta por Cliente (2,0 pontos) :white_check_mark: 
 - Quantidade de processadores / núcleos (0,4)
 - Memória RAM livre (0,4)
 - Espaço em disco livre (0,4)
 - IPs das interfaces de rede, incluindo status (UP/DOWN) e tipo (loopback, ethernet, wifi) (0,4)
 - Identificação do sistema operacional (0,4)
-### 2.2 Servidor / Consolidação (2,0 pontos)
+### 2.2 Servidor / Consolidação (2,0 pontos) :white_check_mark: 
 - Dashboard em terminal ou interface gráfica simples com lista de clientes, última atualização,sistema operacional e IP principal (0,5)
 - Consolidação dos dados com cálculo de média simples e contagem de clientes online e offline.
 Cliente offline é aquele que não responde ao mecanismo de hello por mais de 30 segundos (0,5)
